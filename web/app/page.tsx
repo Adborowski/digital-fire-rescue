@@ -1,7 +1,23 @@
 import Link from "next/link";
-import { typeCounts } from "@/lib/db";
+import { typeCounts, hasLocalDb } from "@/lib/db";
+
+export const dynamic = "force-dynamic";
+
+function NoLocalDb() {
+  return (
+    <div className="text-center py-16 text-stone-500">
+      <p className="text-lg font-medium mb-2">Entity browser is a local-only tool.</p>
+      <p className="text-sm">It reads the SQLite database that lives next to the scraper on your machine.</p>
+      <p className="mt-4 text-sm">
+        For remote crawl status, use the{" "}
+        <Link href="/dashboard" className="text-amber-700 underline">Live dashboard →</Link>
+      </p>
+    </div>
+  );
+}
 
 export default function Home() {
+  if (!hasLocalDb()) return <NoLocalDb />;
   const rows = typeCounts();
   const totals = rows.reduce(
     (acc, r) => ({ discovered: acc.discovered + r.discovered, extracted: acc.extracted + r.extracted }),

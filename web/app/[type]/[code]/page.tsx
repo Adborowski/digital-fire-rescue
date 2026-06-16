@@ -1,13 +1,16 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { getEntity, getImages, getLinks } from "@/lib/db";
+import { notFound, redirect } from "next/navigation";
+import { getEntity, getImages, getLinks, hasLocalDb } from "@/lib/db";
 import { TablesSection, RecipeSection } from "@/components/DataView";
+
+export const dynamic = "force-dynamic";
 
 export default async function EntityPage({
   params,
 }: {
   params: Promise<{ type: string; code: string }>;
 }) {
+  if (!hasLocalDb()) redirect("/");
   const { type, code } = await params;
   const entity = getEntity(type, code);
   if (!entity) notFound();

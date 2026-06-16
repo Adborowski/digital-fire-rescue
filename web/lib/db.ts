@@ -6,12 +6,24 @@ import path from "path";
 const DB_PATH = path.join(process.cwd(), "..", "data", "db", "digitalfire.sqlite");
 
 let _db: Database.Database | null = null;
+let _dbMissing = false;
 
 export function getDb(): Database.Database {
+  if (_dbMissing) throw new Error("SQLite database not available on this host");
   if (!_db) {
-    _db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
+    try {
+      _db = new Database(DB_PATH, { readonly: true, fileMustExist: true });
+    } catch {
+      _dbMissing = true;
+      throw new Error("SQLite database not available on this host");
+    }
   }
   return _db;
+}
+
+/** Returns true when the local SQLite file can be opened. */
+export function hasLocalDb(): boolean {
+  try { getDb(); return true; } catch { return false; }
 }
 
 export type PageRow = {

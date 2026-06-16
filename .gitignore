@@ -6,3 +6,4 @@ data/assets/
 data/db/*.sqlite
 data/logs/
 .DS_Store
+.env*

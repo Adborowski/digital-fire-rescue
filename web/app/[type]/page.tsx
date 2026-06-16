@@ -1,8 +1,12 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
-import { listEntities, typeCounts } from "@/lib/db";
+import { notFound, redirect } from "next/navigation";
+import { listEntities, typeCounts, hasLocalDb } from "@/lib/db";
+
+export const dynamic = "force-dynamic";
 
 export default async function TypeListPage({ params }: { params: Promise<{ type: string }> }) {
+  if (!hasLocalDb()) redirect("/");
+
   const { type } = await params;
   const known = typeCounts().some((r) => r.type === type);
   if (!known) notFound();

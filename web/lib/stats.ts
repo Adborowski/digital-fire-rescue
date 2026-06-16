@@ -40,7 +40,7 @@ export type ArchiveStats = {
 
 /** Build stats directly from the local SQLite database. */
 export function statsFromDb(): ArchiveStats {
-  // Only import better-sqlite3 at runtime (not in edge runtimes).
+  // Dynamic require keeps better-sqlite3 out of the module graph at build time.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getDb } = require("./db") as typeof import("./db");
   const db = getDb();

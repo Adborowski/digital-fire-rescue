@@ -15,7 +15,9 @@
 
 import type { ArchiveStats } from "@/lib/stats";
 
-export const revalidate = 30;
+// Never prerender this route at build time — it reads from Redis (prod) or
+// a local SQLite file (dev), neither of which exists at build time on Vercel.
+export const dynamic = "force-dynamic";
 
 // Accept both Upstash's current env var names AND the old Vercel KV names
 // so the code works regardless of which integration you used.
