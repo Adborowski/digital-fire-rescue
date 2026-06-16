@@ -62,8 +62,15 @@ jobs:
       #   hosted on GitHub's infrastructure instead of your laptop).
       #   Stops gracefully 15 minutes before GitHub's 6-hour job limit.
       - name: Fetch pages
+        # --fallback-wayback: try the live site first (gets the most current
+        # version when the site is up); automatically falls back to
+        # web.archive.org if the live page returns a soft-404 or times out.
+        # Default delay is 20s (robots.txt crawl-delay for the live site);
+        # override via the CRAWL_DELAY_SECONDS repository variable if Tony
+        # grants faster access, or set to 3 if running purely via Wayback.
         run: |
           PYTHONPATH=src python -m digitalfire_archive.fetch \
+            --fallback-wayback \
             --delay ${{ vars.CRAWL_DELAY_SECONDS || 20 }} \
             --max-duration 20700
 

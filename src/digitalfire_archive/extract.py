@@ -168,6 +168,18 @@ def extract_recipe_xml(soup) -> tuple[str | None, dict | None]:
         return raw_xml, None
 
 
+def is_soft_404(soup) -> bool:
+    """Detect pages the server returned as HTTP 200 but are actually error
+    pages (common on PHP legacy sites). Tony's site emits a page whose first
+    h3 is 'Error 404' and body text starts with 'Operation timed out' or
+    'Request Not Recognized' when a URL doesn't resolve."""
+    first_h3 = soup.find("h3")
+    if first_h3 and "error 404" in first_h3.get_text(strip=True).lower():
+        return True
+    body_text = soup.body.get_text(" ", strip=True) if soup.body else ""
+    return "Operation timed out" in body_text or "Request Not Recognized" in body_text
+
+
 def extract_one(html: str) -> dict:
     soup = BeautifulSoup(html, "lxml")
     raw_export, recipe_data = extract_recipe_xml(soup)
@@ -203,6 +215,16 @@ def run(*, type_filter: str | None, limit: int | None) -> dict[str, int]:
             path = config.ROOT_DIR / row["html_path"]
             try:
                 html = path.read_text(encoding="utf-8", errors="replace")
+                soup_check = BeautifulSoup(html, "lxml")
+                if is_soft_404(soup_check):
+                    log.warning("soft 404 (HTTP 200 with error body): %s", row["url"])
+                    with db.cursor() as cur2:
+                        cur2.execute(
+                            "UPDATE pages SET status='error', error='soft 404 - page served as HTTP 200 but body is an error page' WHERE url=?",
+                            (row["url"],),
+                        )
+                    counts["error"] += 1
+                    continue
                 result = extract_one(html)
             except Exception as exc:  # keep going -- one bad page shouldn't kill the run
                 log.warning("failed to extract %s: %s", row["url"], exc)
