@@ -117,12 +117,14 @@ jobs:
           tar -czf /tmp/data.tar.gz data/db data/raw_html data/logs
           gh release upload archive /tmp/data.tar.gz --clobber
 
-      # ── 9. IA backstop (optional, runs only when IA credentials are set) ─────
-      #   Set IA_ACCESS_KEY and IA_SECRET_KEY as repository secrets in
-      #   Settings → Secrets → Actions to activate this step. Get free keys
-      #   at https://archive.org/account/s3.php
+      # ── 9. IA backstop (optional) ────────────────────────────────────────────
+      #   Get free IA API keys at https://archive.org/account/s3.php and add
+      #   them as repository secrets (IA_ACCESS_KEY, IA_SECRET_KEY).
+      #   The script exits gracefully without them; the `if:` uses a repo
+      #   *variable* (not a secret) because secrets can't appear in if conditions.
+      #   Set ENABLE_IA_BACKSTOP = true in Settings → Variables → Actions to activate.
       - name: Internet Archive Save Page Now
-        if: ${{ secrets.IA_ACCESS_KEY != '' }}
+        if: vars.ENABLE_IA_BACKSTOP == 'true'
         env:
           IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
           IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}

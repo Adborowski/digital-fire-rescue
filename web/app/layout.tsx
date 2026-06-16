@@ -16,10 +16,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="font-semibold">
               🏺 Digitalfire Archive
             </Link>
-            <Link href="/dashboard" className="text-sm text-stone-500 hover:text-amber-700">
+            <Link href="/dashboard" className="text-sm font-medium text-stone-700 hover:text-amber-700">
               Live status
             </Link>
-            <span className="ml-auto text-sm text-stone-400">reads data/db/digitalfire.sqlite</span>
+            <span className="ml-auto text-sm text-stone-600">reads data/db/digitalfire.sqlite</span>
           </div>
         </header>
         <main className="mx-auto max-w-5xl px-4 py-6">{children}</main>

@@ -13,8 +13,8 @@ function pct(n: number, total: number) {
 function Bar({ value, total, color = "bg-amber-500" }: { value: number; total: number; color?: string }) {
   const p = pct(value, total);
   return (
-    <div className="w-full bg-stone-200 rounded-full h-2 overflow-hidden">
-      <div className={`${color} h-2 rounded-full transition-all duration-700`} style={{ width: `${p}%` }} />
+    <div className="w-full bg-stone-200 rounded-full h-2.5 overflow-hidden">
+      <div className={`${color} h-2.5 rounded-full transition-all duration-700`} style={{ width: `${p}%` }} />
     </div>
   );
 }
@@ -23,7 +23,8 @@ function BigNumber({ n, label }: { n: number; label: string }) {
   return (
     <div className="text-center">
       <div className="text-3xl font-bold">{n.toLocaleString()}</div>
-      <div className="text-xs text-stone-500 mt-0.5">{label}</div>
+      {/* stone-600 instead of stone-500 — readable on white */}
+      <div className="text-xs text-stone-600 mt-0.5">{label}</div>
     </div>
   );
 }
@@ -34,14 +35,15 @@ function TypeRow({ row }: { row: TypeStats }) {
   return (
     <tr className="border-b border-stone-100 hover:bg-stone-50">
       <td className="py-2 pr-3 text-sm font-medium">{row.type}</td>
-      <td className="py-2 pr-3 text-right text-sm text-stone-500 tabular-nums">
+      {/* stone-700 for actual data values */}
+      <td className="py-2 pr-3 text-right text-sm text-stone-700 tabular-nums">
         {done.toLocaleString()} / {row.discovered.toLocaleString()}
       </td>
-      <td className="py-2 pr-3 text-right text-sm tabular-nums">{p}%</td>
+      <td className="py-2 pr-3 text-right text-sm font-medium tabular-nums">{p}%</td>
       <td className="py-2 w-36">
         <Bar value={done} total={row.discovered} color={p === 100 ? "bg-green-500" : "bg-amber-500"} />
       </td>
-      <td className="py-2 pl-3 text-right text-sm text-red-500 tabular-nums">
+      <td className="py-2 pl-3 text-right text-sm font-medium text-red-600 tabular-nums">
         {row.errors > 0 ? row.errors : ""}
       </td>
     </tr>
@@ -92,10 +94,10 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Live status</h1>
-        <div className="flex items-center gap-2 text-sm text-stone-500">
+        <div className="flex items-center gap-2 text-sm text-stone-700">
           {loading && <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse inline-block" />}
           <span>Refreshes in {countdown}s</span>
-          <button onClick={load} className="text-amber-700 hover:underline">↻ now</button>
+          <button onClick={load} className="text-amber-700 hover:underline font-medium">↻ now</button>
         </div>
       </div>
 
@@ -105,21 +107,23 @@ export default function DashboardPage() {
 
       {/* Overall progress */}
       <div className="bg-white border border-stone-200 rounded-lg p-5">
-        <div className="flex justify-between items-end mb-2">
+        <div className="flex justify-between items-end mb-3">
           <span className="text-lg font-semibold">
             {fetched.toLocaleString()} of {discovered.toLocaleString()} pages captured
           </span>
           <span className="text-2xl font-bold text-amber-600">{overallPct}%</span>
         </div>
         <Bar value={fetched} total={discovered} color="bg-amber-500" />
-        <div className="flex justify-between mt-3">
+        <div className="flex justify-between mt-4">
           <BigNumber n={extracted} label="extracted to DB" />
           <BigNumber n={errored} label="errors" />
-          <BigNumber n={discovered - fetched - errored} label="remaining" />
-          {stats?.pages_per_hour && <BigNumber n={Math.round(stats.pages_per_hour)} label="pages/hour" />}
+          <BigNumber n={Math.max(0, discovered - fetched - errored)} label="remaining" />
+          {stats?.pages_per_hour != null && (
+            <BigNumber n={Math.round(stats.pages_per_hour)} label="pages / hour" />
+          )}
         </div>
         {stats?.estimated_done_at && (
-          <p className="text-xs text-stone-500 text-center mt-3">
+          <p className="text-sm text-stone-700 text-center mt-4 font-medium">
             Est. completion: {new Date(stats.estimated_done_at).toLocaleString()}
           </p>
         )}
@@ -127,16 +131,16 @@ export default function DashboardPage() {
 
       {/* Source split */}
       {(totals?.via_live || totals?.via_wayback) ? (
-        <div className="bg-white border border-stone-200 rounded-lg p-4 grid grid-cols-2 gap-4 text-sm">
+        <div className="bg-white border border-stone-200 rounded-lg p-4 grid grid-cols-2 gap-4">
           <div>
-            <div className="font-medium mb-1 text-stone-600">From live site</div>
+            <div className="text-sm font-semibold text-stone-700 mb-1">From live site</div>
             <div className="text-2xl font-bold">{(totals?.via_live ?? 0).toLocaleString()}</div>
-            <div className="text-xs text-stone-400">fresher content</div>
+            <div className="text-sm text-stone-600 mt-0.5">fresher content</div>
           </div>
           <div>
-            <div className="font-medium mb-1 text-stone-600">From Wayback Machine</div>
+            <div className="text-sm font-semibold text-stone-700 mb-1">From Wayback Machine</div>
             <div className="text-2xl font-bold">{(totals?.via_wayback ?? 0).toLocaleString()}</div>
-            <div className="text-xs text-stone-400">IA backup when live was down</div>
+            <div className="text-sm text-stone-600 mt-0.5">IA backup when live was down</div>
           </div>
         </div>
       ) : null}
@@ -150,7 +154,8 @@ export default function DashboardPage() {
           <div className="px-4">
             <table className="w-full">
               <thead>
-                <tr className="text-xs text-stone-400 border-b border-stone-200">
+                {/* stone-600 + font-semibold for column headers */}
+                <tr className="text-xs font-semibold text-stone-600 border-b border-stone-200">
                   <th className="text-left py-2 pr-3">Type</th>
                   <th className="text-right py-2 pr-3">Progress</th>
                   <th className="text-right py-2 pr-3">%</th>
@@ -177,23 +182,24 @@ export default function DashboardPage() {
           <ul className="divide-y divide-stone-100 text-sm font-mono">
             {stats.recent.map((ev, i) => (
               <li key={i} className="px-4 py-1.5 flex items-center gap-3">
-                <span className={ev.status === "fetched" ? "text-green-600" : "text-red-500"}>
+                <span className={ev.status === "fetched" ? "text-green-700 font-bold" : "text-red-600 font-bold"}>
                   {ev.status === "fetched" ? "✓" : "✗"}
                 </span>
-                <span className="text-stone-400 text-xs">{ev.source}</span>
-                <span className="text-stone-700 truncate">{ev.url.replace("https://digitalfire.com", "")}</span>
+                {/* stone-600 for the source badge — was stone-400 (too faint) */}
+                <span className="text-stone-600 text-xs shrink-0">{ev.source}</span>
+                <span className="text-stone-800 truncate">{ev.url.replace("https://digitalfire.com", "")}</span>
               </li>
             ))}
           </ul>
         </div>
       )}
 
-      {/* Footer */}
-      <p className="text-xs text-stone-400 text-center">
+      {/* Footer — stone-600 instead of stone-400 */}
+      <p className="text-xs text-stone-600 text-center">
         {stats?.updated_at
-          ? `Stats last pushed at ${new Date(stats.updated_at).toUTCString()}`
+          ? `Stats last pushed: ${new Date(stats.updated_at).toUTCString()}`
           : "No stats pushed yet — run the crawler once to populate this dashboard."}
-        {stats?.run_id && ` · run ${stats.run_id}`}
+        {stats?.run_id && ` · GH run ${stats.run_id}`}
       </p>
     </div>
   );
