@@ -86,14 +86,14 @@ jobs:
         run: PYTHONPATH=src python -m digitalfire_archive.verify
 
       # ── 8a. Push stats to Vercel dashboard ────────────────────────────────────
-      #   Set KV_REST_API_URL and KV_REST_API_TOKEN as repository secrets
-      #   (copy them from your Vercel project → Storage → KV → .env.local).
+      #   Add KV_REST_API_URL and KV_REST_API_TOKEN as repository secrets
+      #   (exact names from your .env.local / Vercel → Storage → .env.local).
       #   Non-fatal if missing — crawler continues without dashboard update.
       - name: Push stats to dashboard
         if: always()
         env:
-          UPSTASH_REDIS_REST_URL:   ${{ secrets.UPSTASH_REDIS_REST_URL }}
-          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
+          KV_REST_API_URL:   ${{ secrets.KV_REST_API_URL }}
+          KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
         run: PYTHONPATH=src python -m digitalfire_archive.stats_push
 
       # ── 8. Save state ─────────────────────────────────────────────────────────
