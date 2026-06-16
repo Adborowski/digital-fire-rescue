@@ -8,7 +8,7 @@ discover:
 	. .venv/bin/activate && PYTHONPATH=src python -m digitalfire_archive.discover
 
 # Full run respects robots.txt Crawl-delay: 20 by default -- at 11,431 pages
-# that's ~3.5 days. Narrow with --type, or pass --delay once Tony's said ok
+# that's ~2.6 days. Narrow with --type, or pass --delay once Tony's said ok
 # to go faster. e.g. make fetch ARGS="--type recipe"
 fetch:
 	. .venv/bin/activate && PYTHONPATH=src python -m digitalfire_archive.fetch $(ARGS)
