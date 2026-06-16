@@ -1,4 +1,4 @@
-.PHONY: setup discover fetch extract assets verify ia-backstop
+.PHONY: setup discover fetch extract assets verify ia-backstop stats-push dev
 
 setup:
 	python3 -m venv .venv
@@ -24,3 +24,9 @@ verify:
 
 ia-backstop:
 	. .venv/bin/activate && PYTHONPATH=src python -m digitalfire_archive.ia_backstop $(ARGS)
+
+stats-push:
+	. .venv/bin/activate && PYTHONPATH=src python -m digitalfire_archive.stats_push $(ARGS)
+
+dev:
+	cd web && npm run dev

@@ -85,6 +85,17 @@ jobs:
       - name: Verify completeness
         run: PYTHONPATH=src python -m digitalfire_archive.verify
 
+      # ── 8a. Push stats to Vercel dashboard ────────────────────────────────────
+      #   Set KV_REST_API_URL and KV_REST_API_TOKEN as repository secrets
+      #   (copy them from your Vercel project → Storage → KV → .env.local).
+      #   Non-fatal if missing — crawler continues without dashboard update.
+      - name: Push stats to dashboard
+        if: always()
+        env:
+          KV_REST_API_URL: ${{ secrets.KV_REST_API_URL }}
+          KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
+        run: PYTHONPATH=src python -m digitalfire_archive.stats_push
+
       # ── 8. Save state ─────────────────────────────────────────────────────────
       #   Package the SQLite db and raw HTML into a tarball and upload it to
       #   the "archive" release, replacing the previous asset. Images from
