@@ -28,6 +28,7 @@ def local_path_for(type_: str, code: str | None, src_url: str) -> Path:
 
 
 def run(*, limit: int | None, delay: float) -> dict[str, int]:
+    db.init_db()
     session = requests.Session()
     session.headers["User-Agent"] = config.USER_AGENT
 

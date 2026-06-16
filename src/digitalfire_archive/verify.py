@@ -13,6 +13,7 @@ log = logging.getLogger("verify")
 
 
 def run() -> None:
+    db.init_db()
     with db.cursor() as cur:
         rows = cur.execute(
             """

@@ -103,7 +103,10 @@ def fetch_one(session: requests.Session, row, *, force: bool) -> tuple[str, str]
         return "fetched", str(path)
 
 
-def run(*, type_filter: str | None, limit: int | None, delay: float, allow_disallowed: bool, force: bool) -> None:
+def run(*, type_filter: str | None, limit: int | None, delay: float, allow_disallowed: bool, force: bool,
+        max_duration: float | None = None) -> None:
+    db.init_db()
+    start_time = time.time()
     session = make_session()
     statuses = ("pending", "error") if force else ("pending",)
     with db.cursor() as cur:
@@ -122,6 +125,10 @@ def run(*, type_filter: str | None, limit: int | None, delay: float, allow_disal
     log.info("%d pages queued (delay=%.1fs)", len(rows), delay)
     counts = {"fetched": 0, "not-modified": 0, "error": 0, "skipped-robots": 0}
     for i, row in enumerate(rows, 1):
+        if max_duration and (time.time() - start_time) >= max_duration:
+            remaining = len(rows) - i + 1
+            log.info("time budget exhausted after %.0fs; %d pages remain (still pending)", time.time() - start_time, remaining)
+            break
         if is_disallowed(row["url"]) and not allow_disallowed:
             with db.cursor() as cur:
                 cur.execute(
@@ -147,10 +154,12 @@ if __name__ == "__main__":
     parser.add_argument("--allow-disallowed", action="store_true",
                          help="also fetch /uploads/ /videos/ /cgi-bin/ -- only use with Tony's OK")
     parser.add_argument("--force", action="store_true", help="refetch even already-fetched pages")
+    parser.add_argument("--max-duration", type=float, default=None,
+                         help="stop gracefully after N seconds (for GitHub Actions time-boxed runs)")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
                          handlers=[logging.StreamHandler(),
                                    logging.FileHandler(config.LOG_DIR / "fetch.log")])
     run(type_filter=args.type_filter, limit=args.limit, delay=args.delay,
-        allow_disallowed=args.allow_disallowed, force=args.force)
+        allow_disallowed=args.allow_disallowed, force=args.force, max_duration=args.max_duration)

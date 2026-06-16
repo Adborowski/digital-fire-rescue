@@ -186,6 +186,7 @@ def extract_one(html: str) -> dict:
 
 
 def run(*, type_filter: str | None, limit: int | None) -> dict[str, int]:
+    db.init_db()
     with db.cursor() as cur:
         query = "SELECT * FROM pages WHERE status = 'fetched'"
         params: list = []
