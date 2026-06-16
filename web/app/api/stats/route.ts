@@ -3,49 +3,71 @@
  *
  * Returns the current archive stats as JSON.
  *
- * In production (Vercel): reads from Vercel KV, where the GH Actions
- * crawler pushes a snapshot after each batch via stats_push.py.
+ * Production (Vercel + Upstash Redis): reads from Redis, where the
+ * GH Actions crawler pushes a snapshot via stats_push.py after each batch.
+ * Set up via: Vercel dashboard → Storage → Upstash → Redis → Connect.
+ * The two env vars Upstash injects (UPSTASH_REDIS_REST_URL and
+ * UPSTASH_REDIS_REST_TOKEN) are all this needs.
  *
- * Locally: reads directly from data/db/digitalfire.sqlite via better-sqlite3.
- * No KV setup needed to use the dashboard in development.
+ * Local dev: reads directly from data/db/digitalfire.sqlite.
+ * No Redis setup needed.
  */
 
 import type { ArchiveStats } from "@/lib/stats";
 
-// Revalidate at most every 30 s when deployed (Next.js route segment config).
 export const revalidate = 30;
 
+// Accept both Upstash's current env var names AND the old Vercel KV names
+// so the code works regardless of which integration you used.
+function redisConfig() {
+  return {
+    url:   process.env.UPSTASH_REDIS_REST_URL   ?? process.env.KV_REST_API_URL   ?? "",
+    token: process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN ?? "",
+  };
+}
+
+const EMPTY: ArchiveStats = {
+  updated_at: null,
+  run_id: null,
+  totals: { discovered: 0, fetched: 0, extracted: 0, errors: 0, via_live: 0, via_wayback: 0 },
+  by_type: [],
+  recent: [],
+  pages_per_hour: null,
+  estimated_done_at: null,
+};
+
 export async function GET(): Promise<Response> {
-  let stats: ArchiveStats;
+  const { url, token } = redisConfig();
 
-  const kvUrl = process.env.KV_REST_API_URL;
-  const kvToken = process.env.KV_REST_API_TOKEN;
-
-  if (kvUrl && kvToken) {
-    // Production: read from Vercel KV (Upstash REST API).
-    const res = await fetch(`${kvUrl}/get/df:stats`, {
-      headers: { Authorization: `Bearer ${kvToken}` },
+  if (url && token) {
+    // Production: Upstash Redis REST API.
+    // GET https://<url>/get/<key>  →  { result: "...json..." | null }
+    const res = await fetch(`${url}/get/df:stats`, {
+      headers: { Authorization: `Bearer ${token}` },
       next: { revalidate: 30 },
     });
+
     if (!res.ok) {
-      return Response.json({ error: "KV read failed", status: res.status }, { status: 502 });
-    }
-    const body = await res.json();
-    // Upstash REST returns { result: "...jsonstring..." }
-    if (!body.result) {
       return Response.json(
-        { error: "No stats in KV yet. Run the crawler once to populate.", totals: { discovered: 0, fetched: 0, extracted: 0, errors: 0, via_live: 0, via_wayback: 0 }, by_type: [], recent: [], updated_at: null, run_id: null, pages_per_hour: null, estimated_done_at: null } as ArchiveStats,
-        { status: 200 }
+        { ...EMPTY, error: `Redis read failed (HTTP ${res.status})` },
+        { status: 502 }
       );
     }
-    stats = JSON.parse(body.result) as ArchiveStats;
-  } else {
-    // Local dev: read directly from SQLite.
-    const { statsFromDb } = await import("@/lib/stats");
-    stats = statsFromDb();
+
+    const body = (await res.json()) as { result: string | null };
+
+    if (!body.result) {
+      // Nothing pushed yet — return zeros so the dashboard renders.
+      return Response.json(EMPTY);
+    }
+
+    const stats = JSON.parse(body.result) as ArchiveStats;
+    return Response.json(stats, {
+      headers: { "Cache-Control": "s-maxage=30, stale-while-revalidate=60" },
+    });
   }
 
-  return Response.json(stats, {
-    headers: { "Cache-Control": "s-maxage=30, stale-while-revalidate=60" },
-  });
+  // Local dev: read from SQLite.
+  const { statsFromDb } = await import("@/lib/stats");
+  return Response.json(statsFromDb());
 }

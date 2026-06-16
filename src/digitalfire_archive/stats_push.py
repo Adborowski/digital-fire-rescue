@@ -25,8 +25,9 @@ from . import config, db
 
 log = logging.getLogger("stats_push")
 
-KV_URL = os.environ.get("KV_REST_API_URL", "")
-KV_TOKEN = os.environ.get("KV_REST_API_TOKEN", "")
+# Accept both Upstash's current names and the old Vercel KV names.
+KV_URL   = os.environ.get("UPSTASH_REDIS_REST_URL")   or os.environ.get("KV_REST_API_URL",   "")
+KV_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN") or os.environ.get("KV_REST_API_TOKEN", "")
 
 
 def collect_stats(recent_n: int = 25) -> dict:

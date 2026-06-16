@@ -92,8 +92,8 @@ jobs:
       - name: Push stats to dashboard
         if: always()
         env:
-          KV_REST_API_URL: ${{ secrets.KV_REST_API_URL }}
-          KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
+          UPSTASH_REDIS_REST_URL:   ${{ secrets.UPSTASH_REDIS_REST_URL }}
+          UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
         run: PYTHONPATH=src python -m digitalfire_archive.stats_push
 
       # ── 8. Save state ─────────────────────────────────────────────────────────
