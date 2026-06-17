@@ -1,21 +1,24 @@
 name: Digitalfire Archiver
 
 on:
-  # Runs every 6 hours. Each job runs for at most 6h before GitHub kills it,
-  # so we instruct fetch.py to stop after 5h 45m (--max-duration 20700),
-  # leaving 15 minutes to save state before the hard cap.
+  # Every 2 hours. Each job is capped at ~90 minutes total, so there's
+  # always a 30-minute gap between runs -- no overlap, no queuing issues.
   schedule:
-    - cron: "0 */6 * * *"
-  # Manual trigger: "workflow_dispatch" lets you kick it off immediately from
-  # the Actions tab -- useful for the first run and for one-off resumption.
+    - cron: "0 */2 * * *"
   workflow_dispatch:
+
+# Prevent two runs colliding on the GitHub Release state file.
+concurrency:
+  group: digitalfire-crawl
+  cancel-in-progress: false
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
+    # Hard ceiling. Step-level timeouts below mean we should always finish
+    # well inside this, but this is the safety net.
+    timeout-minutes: 90
     permissions:
-      # Needed for the `gh` CLI to create and update the release asset that
-      # stores persistent state between runs (no external bucket required).
       contents: write
 
     steps:
@@ -31,12 +34,6 @@ jobs:
       - run: pip install -r requirements.txt
 
       # ── 3. Restore previous state ─────────────────────────────────────────
-      #   We store the crawl state (SQLite db + raw HTML) as an asset on a
-      #   dedicated GitHub Release ("archive"). No external accounts or
-      #   secrets needed -- GITHUB_TOKEN is automatically available.
-      #
-      #   First run: the release + asset don't exist yet, so this step exits 0
-      #   with a warning and we start fresh (discover creates a new DB).
       - name: Restore archive state
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -49,46 +46,61 @@ jobs:
             echo "No previous state found -- starting fresh."
           fi
 
-      # ── 4. Discover ───────────────────────────────────────────────────────────
-      #   Cheap (~23 requests, no delay). Updates the pages table with any
-      #   new/changed URLs since last run. Already-fetched pages keep their
-      #   status, so this is safe to re-run every time.
+      # ── 4. Discover ──────────────────────────────────────────────────────────
       - name: Discover URLs
         run: PYTHONPATH=src python -m digitalfire_archive.discover
 
       # ── 5. Fetch ─────────────────────────────────────────────────────────────
-      #   Respects robots.txt Crawl-delay: 20 (one request every 20 seconds,
-      #   single-threaded -- identical behaviour to running locally, just
-      #   hosted on GitHub's infrastructure instead of your laptop).
-      #   Stops gracefully 15 minutes before GitHub's 6-hour job limit.
+      #   Step timeout (55 min) > Python --max-duration (50 min) so Python exits
+      #   cleanly first. If somehow Python hangs, GHA's step timeout kills the
+      #   step and the job continues to Extract → Save state below.
       - name: Fetch pages
-        # --fallback-wayback: try the live site first (gets the most current
-        # version when the site is up); automatically falls back to
-        # web.archive.org if the live page returns a soft-404 or times out.
-        # Default delay is 20s (robots.txt crawl-delay for the live site);
-        # override via the CRAWL_DELAY_SECONDS repository variable if Tony
-        # grants faster access, or set to 3 if running purely via Wayback.
+        timeout-minutes: 55
         run: |
           PYTHONPATH=src python -m digitalfire_archive.fetch \
             --fallback-wayback \
             --delay ${{ vars.CRAWL_DELAY_SECONDS || 20 }} \
-            --max-duration 20700
+            --max-duration 3000
 
-      # ── 6. Extract + assets ──────────────────────────────────────────────────
+      # ── 6. Extract ───────────────────────────────────────────────────────────
       - name: Extract structured data
         run: PYTHONPATH=src python -m digitalfire_archive.extract
 
+      # ── 7. Save state (always) ───────────────────────────────────────────────
+      #   Runs even if Fetch or Extract failed/timed out. This is the most
+      #   important step -- it persists everything fetched so far so the next
+      #   run doesn't start from zero. Keep it before Assets so a slow image
+      #   download can never prevent HTML from being saved.
+      - name: Save archive state
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view archive &>/dev/null; then
+            gh release create archive \
+              --title "Digitalfire archive data" \
+              --notes "Crawl state maintained by the crawl workflow." \
+              --prerelease
+          fi
+          tar -czf /tmp/data.tar.gz data/db data/raw_html data/logs
+          gh release upload archive /tmp/data.tar.gz --clobber
+
+      # ── 8. Download images ───────────────────────────────────────────────────
+      #   Runs after save so a slow/interrupted image batch never blocks the
+      #   HTML save. Images live on S3 and can be re-downloaded any time, so
+      #   losing a partial batch is harmless.
       - name: Download assets (images)
-        run: PYTHONPATH=src python -m digitalfire_archive.assets --delay 1.0
+        timeout-minutes: 10
+        if: always()
+        run: |
+          PYTHONPATH=src python -m digitalfire_archive.assets \
+            --delay 0.5 \
+            --max-duration 540
 
-      # ── 7. Verify ─────────────────────────────────────────────────────────────
-      - name: Verify completeness
-        run: PYTHONPATH=src python -m digitalfire_archive.verify
-
-      # ── 8a. Push stats to Vercel dashboard ────────────────────────────────────
-      #   Add KV_REST_API_URL and KV_REST_API_TOKEN as repository secrets
-      #   (exact names from your .env.local / Vercel → Storage → .env.local).
-      #   Non-fatal if missing — crawler continues without dashboard update.
+      # ── 9. Push stats to dashboard ───────────────────────────────────────────
+      #   Add KV_REST_API_URL and KV_REST_API_TOKEN as repository secrets:
+      #   Settings → Secrets and variables → Actions → New repository secret.
+      #   Copy both values directly from your .env.local file.
       - name: Push stats to dashboard
         if: always()
         env:
@@ -96,33 +108,14 @@ jobs:
           KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
         run: PYTHONPATH=src python -m digitalfire_archive.stats_push
 
-      # ── 8. Save state ─────────────────────────────────────────────────────────
-      #   Package the SQLite db and raw HTML into a tarball and upload it to
-      #   the "archive" release, replacing the previous asset. Images from
-      #   S3 are NOT included (they're re-downloadable via image URLs stored
-      #   in the db), keeping the tarball manageable.
-      - name: Save archive state
-        if: always()   # save even if earlier steps partially failed
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Create the release if it doesn't exist yet
-          if ! gh release view archive &>/dev/null; then
-            gh release create archive \
-              --title "Digitalfire archive data" \
-              --notes "Crawl state maintained by the 'crawl' workflow. Download data.tar.gz to resume locally." \
-              --prerelease
-          fi
-          # Pack and upload (replaces the previous asset)
-          tar -czf /tmp/data.tar.gz data/db data/raw_html data/logs
-          gh release upload archive /tmp/data.tar.gz --clobber
+      # ── 10. Verify ───────────────────────────────────────────────────────────
+      - name: Verify completeness
+        if: always()
+        run: PYTHONPATH=src python -m digitalfire_archive.verify
 
-      # ── 9. IA backstop (optional) ────────────────────────────────────────────
-      #   Get free IA API keys at https://archive.org/account/s3.php and add
-      #   them as repository secrets (IA_ACCESS_KEY, IA_SECRET_KEY).
-      #   The script exits gracefully without them; the `if:` uses a repo
-      #   *variable* (not a secret) because secrets can't appear in if conditions.
-      #   Set ENABLE_IA_BACKSTOP = true in Settings → Variables → Actions to activate.
+      # ── 11. IA backstop (optional) ───────────────────────────────────────────
+      #   Set ENABLE_IA_BACKSTOP = true in Settings → Variables → Actions.
+      #   Add IA_ACCESS_KEY + IA_SECRET_KEY as secrets if you have them.
       - name: Internet Archive Save Page Now
         if: vars.ENABLE_IA_BACKSTOP == 'true'
         env:

@@ -27,8 +27,9 @@ def local_path_for(type_: str, code: str | None, src_url: str) -> Path:
     return d / fetch.sanitize(filename)
 
 
-def run(*, limit: int | None, delay: float) -> dict[str, int]:
+def run(*, limit: int | None, delay: float, max_duration: float | None = None) -> dict[str, int]:
     db.init_db()
+    start_time = time.time()
     session = requests.Session()
     session.headers["User-Agent"] = config.USER_AGENT
 
@@ -45,6 +46,9 @@ def run(*, limit: int | None, delay: float) -> dict[str, int]:
     log.info("%d images queued", len(rows))
     counts = {"downloaded": 0, "error": 0}
     for i, row in enumerate(rows, 1):
+        if max_duration and (time.time() - start_time) >= max_duration:
+            log.info("assets: time budget exhausted after %.0fs; %d images remain", time.time() - start_time, len(rows) - i + 1)
+            break
         path = local_path_for(row["type"], row["code"], row["src_url"])
         try:
             resp = session.get(row["src_url"], timeout=30)
@@ -67,6 +71,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--delay", type=float, default=1.0)
+    parser.add_argument("--max-duration", type=float, default=None,
+                        help="stop gracefully after N seconds")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    print(run(limit=args.limit, delay=args.delay))
+    print(run(limit=args.limit, delay=args.delay, max_duration=args.max_duration))
