@@ -70,6 +70,7 @@ def _push_dashboard() -> None:
 def run(
     *,
     limit: int | None,
+    type_filter: str | None = None,
     delay: float,
     fallback_wayback: bool,
     via_wayback: bool,
@@ -84,10 +85,15 @@ def run(
     asset_session.headers["User-Agent"] = config.USER_AGENT
 
     with db.cursor() as cur:
-        query = "SELECT * FROM pages WHERE status = 'pending' ORDER BY type, code"
+        query = "SELECT * FROM pages WHERE status = 'pending'"
+        params: list = []
+        if type_filter:
+            query += " AND type = ?"
+            params.append(type_filter)
+        query += " ORDER BY type, code"
         if limit:
             query += f" LIMIT {int(limit)}"
-        rows = cur.execute(query).fetchall()
+        rows = cur.execute(query, params).fetchall()
 
     log.info("%d pending pages queued", len(rows))
     counts = {"fetched": 0, "extracted": 0, "assets": 0, "errors": 0}
@@ -175,6 +181,7 @@ def run(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--type", dest="type_filter", help="only process this content type")
     parser.add_argument("--delay", type=float, default=config.DEFAULT_CRAWL_DELAY_SECONDS)
     parser.add_argument("--max-duration", type=float, default=None,
                         help="stop gracefully after N seconds")
@@ -197,6 +204,7 @@ if __name__ == "__main__":
     )
     run(
         limit=args.limit,
+        type_filter=args.type_filter,
         delay=args.delay,
         fallback_wayback=args.fallback_wayback,
         via_wayback=args.via_wayback,
