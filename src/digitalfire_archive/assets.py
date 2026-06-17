@@ -27,6 +27,36 @@ def local_path_for(type_: str, code: str | None, src_url: str) -> Path:
     return d / fetch.sanitize(filename)
 
 
+def download_for_entity(entity_url: str, session: requests.Session, delay: float = 0.3) -> int:
+    """Download images for a single entity. Used by pipeline.py for per-page processing.
+    Returns the number of images downloaded.
+    """
+    with db.cursor() as cur:
+        # Join entities to get type/code for the local path
+        rows = cur.execute(
+            """SELECT images.id, images.src_url, entities.type, entities.code
+               FROM images JOIN entities ON images.entity_url = entities.url
+               WHERE images.entity_url=? AND images.local_path IS NULL""",
+            (entity_url,),
+        ).fetchall()
+    downloaded = 0
+    for i, row in enumerate(rows):
+        path = local_path_for(row["type"], row["code"], row["src_url"])
+        try:
+            resp = session.get(row["src_url"], timeout=20)
+            resp.raise_for_status()
+            path.write_bytes(resp.content)
+            with db.cursor() as cur:
+                cur.execute("UPDATE images SET local_path=? WHERE id=?",
+                            (str(path.relative_to(config.ROOT_DIR)), row["id"]))
+            downloaded += 1
+        except requests.RequestException:
+            pass
+        if i < len(rows) - 1:
+            time.sleep(delay)
+    return downloaded
+
+
 def run(*, limit: int | None, delay: float, max_duration: float | None = None) -> dict[str, int]:
     db.init_db()
     start_time = time.time()

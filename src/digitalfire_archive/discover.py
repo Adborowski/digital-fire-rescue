@@ -146,6 +146,34 @@ def run() -> dict[str, dict[str, int]]:
     return report
 
 
+def reconcile() -> int:
+    """Reset pages that SQLite thinks are 'fetched' but whose HTML file no
+    longer exists on disk (happens when a new GH Actions runner starts fresh
+    from a DB-only checkpoint, without the raw HTML from the previous run).
+
+    Returns the number of pages reset to 'pending' so they'll be re-fetched.
+    """
+    db.init_db()
+    conn = db.connect()
+    rows = conn.execute(
+        "SELECT url, html_path FROM pages WHERE status = 'fetched' AND html_path IS NOT NULL"
+    ).fetchall()
+    reset = 0
+    from . import config
+    for row in rows:
+        if not (config.ROOT_DIR / row["html_path"]).exists():
+            conn.execute(
+                "UPDATE pages SET status='pending', html_path=NULL WHERE url=?",
+                (row["url"],),
+            )
+            reset += 1
+    conn.commit()
+    conn.close()
+    if reset:
+        log.info("reconcile: reset %d fetched-but-missing pages to pending", reset)
+    return reset
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     result = run()

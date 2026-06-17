@@ -168,7 +168,14 @@ def run(recent_n: int = 25) -> None:
         ok = push_to_kv(stats)
         print(f"KV push: {'✓ ok' if ok else '✗ failed (non-fatal)'}")
     else:
-        print("KV_REST_API_URL / KV_REST_API_TOKEN not set — printing only, not pushing.")
+        missing = []
+        if not KV_URL:
+            missing.append("KV_REST_API_URL")
+        if not KV_TOKEN:
+            missing.append("KV_REST_API_TOKEN")
+        print(f"Dashboard push skipped — missing env vars: {', '.join(missing)}")
+        print("  Add these as GitHub repository secrets (Settings → Secrets → Actions)")
+        print("  Values are in your .env.local file")
 
 
 if __name__ == "__main__":

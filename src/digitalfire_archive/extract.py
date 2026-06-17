@@ -197,6 +197,32 @@ def extract_one(html: str) -> dict:
     }
 
 
+def save_extraction(cur, url: str, type_: str, code, result: dict) -> None:
+    """Persist one extract_one() result to the DB.
+
+    Factored out of run() so pipeline.py can call it per-page without
+    duplicating the upsert + image/link insertion logic.
+    """
+    db.upsert_entity(
+        cur, url=url, type_=type_, code=code,
+        title=result["title"], summary=result["summary"],
+        body_text=result["body_text"], data=result["data"],
+        raw_export=result["raw_export"],
+    )
+    cur.execute("DELETE FROM images WHERE entity_url = ?", (url,))
+    cur.execute("DELETE FROM links WHERE source_url = ?", (url,))
+    for img in result["images"]:
+        cur.execute(
+            "INSERT INTO images (entity_url, src_url, caption, picture_page_url) VALUES (?, ?, ?, ?)",
+            (url, img["src_url"], img["caption"], img["picture_page_url"]),
+        )
+    for link in result["links"]:
+        cur.execute(
+            "INSERT INTO links (source_url, target_url, target_type, label) VALUES (?, ?, ?, ?)",
+            (url, link["target_url"], link["target_type"], link["label"]),
+        )
+
+
 def run(*, type_filter: str | None, limit: int | None) -> dict[str, int]:
     db.init_db()
     with db.cursor() as cur:
@@ -231,24 +257,7 @@ def run(*, type_filter: str | None, limit: int | None) -> dict[str, int]:
                 counts["error"] += 1
                 continue
 
-            db.upsert_entity(
-                cur, url=row["url"], type_=row["type"], code=row["code"],
-                title=result["title"], summary=result["summary"],
-                body_text=result["body_text"], data=result["data"],
-                raw_export=result["raw_export"],
-            )
-            cur.execute("DELETE FROM images WHERE entity_url = ?", (row["url"],))
-            cur.execute("DELETE FROM links WHERE source_url = ?", (row["url"],))
-            for img in result["images"]:
-                cur.execute(
-                    "INSERT INTO images (entity_url, src_url, caption, picture_page_url) VALUES (?, ?, ?, ?)",
-                    (row["url"], img["src_url"], img["caption"], img["picture_page_url"]),
-                )
-            for link in result["links"]:
-                cur.execute(
-                    "INSERT INTO links (source_url, target_url, target_type, label) VALUES (?, ?, ?, ?)",
-                    (row["url"], link["target_url"], link["target_type"], link["label"]),
-                )
+            save_extraction(cur, row["url"], row["type"], row["code"], result)
             counts["extracted"] += 1
     return counts
 

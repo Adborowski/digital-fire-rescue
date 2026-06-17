@@ -1,13 +1,10 @@
 name: Digitalfire Archiver
 
 on:
-  # Every 2 hours. Each job is capped at ~90 minutes total, so there's
-  # always a 30-minute gap between runs -- no overlap, no queuing issues.
   schedule:
-    - cron: "0 */2 * * *"
+    - cron: "0 */2 * * *"   # every 2 hours
   workflow_dispatch:
 
-# Prevent two runs colliding on the GitHub Release state file.
 concurrency:
   group: digitalfire-crawl
   cancel-in-progress: false
@@ -15,9 +12,7 @@ concurrency:
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    # Hard ceiling. Step-level timeouts below mean we should always finish
-    # well inside this, but this is the safety net.
-    timeout-minutes: 90
+    timeout-minutes: 90         # hard ceiling; pipeline exits cleanly at 50 min
     permissions:
       contents: write
 
@@ -30,48 +25,76 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-
       - run: pip install -r requirements.txt
 
-      # ── 3. Restore previous state ─────────────────────────────────────────
+      # ── 3. Restore state ─────────────────────────────────────────────────────
+      #   Two assets on the release:
+      #   • db.sqlite     — SQLite DB, uploaded every 100 pages by pipeline.py
+      #   • raw_html.tar  — full HTML archive, uploaded once per job at the end
+      #
+      #   We always restore the DB first (most recent state), then layer the
+      #   HTML files on top if available. After restore, `reconcile` resets any
+      #   page that SQLite thinks is 'fetched' but whose HTML file is missing
+      #   (because this runner is fresh). Those pages get re-fetched this run.
       - name: Restore archive state
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p data/raw_html data/assets data/db data/logs
-          if gh release download archive --pattern "data.tar.gz" --dir /tmp 2>/dev/null; then
-            echo "Restoring previous state..."
-            tar -xzf /tmp/data.tar.gz -C .
+
+          # Restore the SQLite DB checkpoint first (small, always current)
+          if gh release download archive --pattern "db.sqlite" --dir data/db 2>/dev/null; then
+            echo "SQLite checkpoint restored"
           else
-            echo "No previous state found -- starting fresh."
+            echo "No SQLite checkpoint found -- starting fresh"
           fi
 
-      # ── 4. Discover ──────────────────────────────────────────────────────────
+          # Restore the HTML files if available (large, may be from a previous job)
+          if gh release download archive --pattern "raw_html.tar" --dir /tmp 2>/dev/null; then
+            tar -xf /tmp/raw_html.tar -C .
+            echo "HTML archive restored"
+          else
+            echo "No HTML archive found -- will re-fetch as needed"
+          fi
+
+      # ── 4. Discover + reconcile ───────────────────────────────────────────────
       - name: Discover URLs
         run: PYTHONPATH=src python -m digitalfire_archive.discover
 
-      # ── 5. Fetch ─────────────────────────────────────────────────────────────
-      #   Step timeout (55 min) > Python --max-duration (50 min) so Python exits
-      #   cleanly first. If somehow Python hangs, GHA's step timeout kills the
-      #   step and the job continues to Extract → Save state below.
-      - name: Fetch pages
-        timeout-minutes: 55
+      - name: Reconcile (re-queue pages missing HTML files)
         run: |
-          PYTHONPATH=src python -m digitalfire_archive.fetch \
+          PYTHONPATH=src python -c "
+          from digitalfire_archive.discover import reconcile
+          n = reconcile()
+          print(f'Reconciled {n} pages → pending')
+          "
+
+      # ── 5. Pipeline (fetch → extract → assets → checkpoint) ─────────────────
+      #   Runs the per-page loop. After every 100 pages it uploads just the
+      #   SQLite DB to the GitHub Release so that cancellation never loses more
+      #   than ~100 pages (33 minutes at 20s/page).
+      #
+      #   step timeout (55 min) > --max-duration (50 min = 3000s) so Python
+      #   always exits cleanly before GH kills the step. If Python somehow
+      #   hangs, the step timeout takes over and the job continues to Save state.
+      - name: Run pipeline
+        timeout-minutes: 55
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KV_REST_API_URL:   ${{ secrets.KV_REST_API_URL }}
+          KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
+        run: |
+          PYTHONPATH=src python -m digitalfire_archive.pipeline \
             --fallback-wayback \
             --delay ${{ vars.CRAWL_DELAY_SECONDS || 20 }} \
-            --max-duration 3000
+            --max-duration 3000 \
+            --checkpoint-every 100
 
-      # ── 6. Extract ───────────────────────────────────────────────────────────
-      - name: Extract structured data
-        run: PYTHONPATH=src python -m digitalfire_archive.extract
-
-      # ── 7. Save state (always) ───────────────────────────────────────────────
-      #   Runs even if Fetch or Extract failed/timed out. This is the most
-      #   important step -- it persists everything fetched so far so the next
-      #   run doesn't start from zero. Keep it before Assets so a slow image
-      #   download can never prevent HTML from being saved.
-      - name: Save archive state
+      # ── 6. Save full HTML archive ─────────────────────────────────────────────
+      #   Always runs (even if pipeline was cut short). Saves raw HTML + logs
+      #   as a separate, larger release asset. The SQLite DB was already saved
+      #   mid-run by pipeline.py, so this is just the HTML backup.
+      - name: Save HTML archive
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -79,28 +102,15 @@ jobs:
           if ! gh release view archive &>/dev/null; then
             gh release create archive \
               --title "Digitalfire archive data" \
-              --notes "Crawl state maintained by the crawl workflow." \
+              --notes "Maintained by the crawl workflow." \
               --prerelease
           fi
-          tar -czf /tmp/data.tar.gz data/db data/raw_html data/logs
-          gh release upload archive /tmp/data.tar.gz --clobber
+          tar -cf /tmp/raw_html.tar data/raw_html data/logs
+          gh release upload archive /tmp/raw_html.tar --clobber
 
-      # ── 8. Download images ───────────────────────────────────────────────────
-      #   Runs after save so a slow/interrupted image batch never blocks the
-      #   HTML save. Images live on S3 and can be re-downloaded any time, so
-      #   losing a partial batch is harmless.
-      - name: Download assets (images)
-        timeout-minutes: 10
-        if: always()
-        run: |
-          PYTHONPATH=src python -m digitalfire_archive.assets \
-            --delay 0.5 \
-            --max-duration 540
-
-      # ── 9. Push stats to dashboard ───────────────────────────────────────────
-      #   Add KV_REST_API_URL and KV_REST_API_TOKEN as repository secrets:
-      #   Settings → Secrets and variables → Actions → New repository secret.
-      #   Copy both values directly from your .env.local file.
+      # ── 7. Final stats push ───────────────────────────────────────────────────
+      #   pipeline.py already pushes stats every checkpoint, but this catches
+      #   the final partial batch and updates the dashboard at end-of-run.
       - name: Push stats to dashboard
         if: always()
         env:
@@ -108,18 +118,15 @@ jobs:
           KV_REST_API_TOKEN: ${{ secrets.KV_REST_API_TOKEN }}
         run: PYTHONPATH=src python -m digitalfire_archive.stats_push
 
-      # ── 10. Verify ───────────────────────────────────────────────────────────
+      # ── 8. Verify ─────────────────────────────────────────────────────────────
       - name: Verify completeness
         if: always()
         run: PYTHONPATH=src python -m digitalfire_archive.verify
 
-      # ── 11. IA backstop (optional) ───────────────────────────────────────────
-      #   Set ENABLE_IA_BACKSTOP = true in Settings → Variables → Actions.
-      #   Add IA_ACCESS_KEY + IA_SECRET_KEY as secrets if you have them.
+      # ── 9. IA backstop (optional) ────────────────────────────────────────────
       - name: Internet Archive Save Page Now
         if: vars.ENABLE_IA_BACKSTOP == 'true'
         env:
           IA_ACCESS_KEY: ${{ secrets.IA_ACCESS_KEY }}
           IA_SECRET_KEY: ${{ secrets.IA_SECRET_KEY }}
-        run: |
-          PYTHONPATH=src python -m digitalfire_archive.ia_backstop --delay 2.0
+        run: PYTHONPATH=src python -m digitalfire_archive.ia_backstop --delay 2.0
