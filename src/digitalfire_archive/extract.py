@@ -23,12 +23,18 @@ also parse it into `data_json["recipe"]`.
 """
 import argparse
 import logging
+import re
 from xml.etree import ElementTree as ET
 
 from bs4 import BeautifulSoup
 
 from . import config, db
 from .discover import KNOWN_TYPES, classify
+
+# Wayback Machine rewrites internal links even with the if_ modifier:
+#   https://web.archive.org/web/20201024224845/https://digitalfire.com/glossary/crazing
+# Strip the WB wrapper so we see the original digitalfire.com URL again.
+_WB_PREFIX = re.compile(r"https?://web\.archive\.org/web/[^/]+/(https?://)")
 
 log = logging.getLogger("extract")
 
@@ -104,6 +110,10 @@ def extract_links(soup) -> list[dict]:
     links, seen = [], set()
     for a in soup.find_all("a", href=True):
         href = a["href"]
+        # Unwrap Wayback Machine URL rewriting before anything else
+        m = _WB_PREFIX.match(href)
+        if m:
+            href = href[m.start(1):]  # keep from "https://" onward
         if href.startswith("/"):
             href = config.BASE_URL + href
         if not href.startswith(config.BASE_URL) or href in seen:
@@ -120,6 +130,10 @@ def extract_images(soup) -> list[dict]:
     images = []
     for img in soup.find_all("img"):
         src = img.get("src") or ""
+        # Unwrap Wayback-rewritten image src
+        m = _WB_PREFIX.match(src)
+        if m:
+            src = src[m.start(1):]
         if not src or any(marker in src for marker in SKIP_IMG_MARKERS) or src.endswith(".svg"):
             continue
         if src.startswith("/"):

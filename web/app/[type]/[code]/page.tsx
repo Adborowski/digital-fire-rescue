@@ -19,6 +19,13 @@ export default async function EntityPage({
     tables?: Parameters<typeof TablesSection>[0]["tables"];
     recipe?: Parameters<typeof RecipeSection>[0]["recipe"];
   };
+
+  // The "Links" table from Tony's page is now stored properly in the SQLite
+  // links table (with real hrefs) — skip it from raw table display so we
+  // don't show the same content twice as unclickable plain text.
+  const dataTables = (data.tables ?? []).filter(
+    (t) => !t.heading || !t.heading.toLowerCase().startsWith("link")
+  );
   const images = getImages(entity.url);
   const links = getLinks(entity.url);
 
@@ -48,9 +55,9 @@ export default async function EntityPage({
         </section>
       )}
 
-      {!!data.tables?.length && (
+      {!!dataTables.length && (
         <section className="mt-6">
-          <TablesSection tables={data.tables} />
+          <TablesSection tables={dataTables} />
         </section>
       )}
 
@@ -80,19 +87,32 @@ export default async function EntityPage({
 
       {!!links.length && (
         <section className="mt-6">
-          <h2 className="font-semibold text-stone-700 mb-2">Linked from this page ({links.length})</h2>
+          <h2 className="font-semibold text-stone-700 mb-2">
+            Cross-references ({links.length})
+          </h2>
           <div className="space-y-2">
             {Object.entries(linksByType).map(([t, ls]) => (
               <div key={t} className="text-sm">
-                <span className="text-stone-500">{t}: </span>
+                <span className="font-medium text-stone-700 capitalize">{t}</span>
+                <span className="text-stone-400 mx-1">·</span>
                 {ls.map((l, i) => {
-                  const targetCode = l.target_url.split("/").pop();
+                  // target_url is always https://digitalfire.com/<type>/<code>
+                  // Use that code as the route param, not l.label (which can be
+                  // the nav-dropdown short code from Wayback's rewritten HTML).
+                  const parts = new URL(l.target_url).pathname.split("/").filter(Boolean);
+                  const targetType = parts[0] ?? t;
+                  const targetCode = parts[1] ?? "";
+                  const display = l.label?.trim() || targetCode;
                   return (
                     <span key={l.id}>
-                      <Link href={`/${t}/${targetCode}`} className="text-amber-700 hover:underline">
-                        {l.label || targetCode}
+                      <Link
+                        href={targetCode ? `/${targetType}/${targetCode}` : `/${targetType}`}
+                        className="text-amber-700 hover:underline"
+                        title={l.target_url}
+                      >
+                        {display}
                       </Link>
-                      {i < ls.length - 1 && ", "}
+                      {i < ls.length - 1 && <span className="text-stone-300">, </span>}
                     </span>
                   );
                 })}
